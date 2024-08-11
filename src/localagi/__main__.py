@@ -3,6 +3,7 @@ import openai
 from langchain.embeddings import LocalAIEmbeddings
 import uuid
 import sys
+import argparse
 
 from localagi import LocalAGI
 from loguru import logger
@@ -10,6 +11,27 @@ from ascii_magic import AsciiArt
 from duckduckgo_search import DDGS
 from typing import Dict, List
 import os
+import json
+from io import StringIO 
+
+# globals (for now) (which we initialize later)
+SYSTEM_PROMPT = None
+DEFAULT_API_BASE = "http://api:8080"
+
+DEFAULT_PROMPT = None
+LOCALAI_API_BASE = None
+TTS_API_BASE = None
+IMAGE_API_BASE = None
+EMBEDDINGS_API_BASE = None
+STABLEDIFFUSION_MODEL = None
+STABLEDIFFUSION_PROMPT = None
+FUNCTIONS_MODEL = None
+EMBEDDINGS_MODEL = None
+LLM_MODEL = None
+VOICE_MODEL = None
+STABLEDIFFUSION_MODEL = None
+STABLEDIFFUSION_PROMPT = None
+PERSISTENT_DIR = None
 
 # these three lines swap the stdlib sqlite3 lib with the pysqlite3 package for chroma
 __import__('pysqlite3')
@@ -18,133 +40,10 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 from langchain.vectorstores import Chroma
 from chromadb.config import Settings
-import json
-import os
-from io import StringIO 
 
-# Parse arguments such as system prompt and batch mode
-import argparse
-parser = argparse.ArgumentParser(description='LocalAGI')
-# System prompt
-parser.add_argument('--system-prompt', dest='system_prompt', action='store',
-                    help='System prompt to use')
-# Batch mode
-parser.add_argument('--prompt', dest='prompt', action='store', default=False,
-                    help='Prompt mode')
-# Interactive mode
-parser.add_argument('--interactive', dest='interactive', action='store_true', default=False,
-                    help='Interactive mode. Can be used with --prompt to start an interactive session')
-# skip avatar creation
-parser.add_argument('--skip-avatar', dest='skip_avatar', action='store_true', default=False,
-                    help='Skip avatar creation') 
-# Reevaluate
-parser.add_argument('--re-evaluate', dest='re_evaluate', action='store_true', default=False,
-                    help='Reevaluate if another action is needed or we have completed the user request')
-# Postprocess
-parser.add_argument('--postprocess', dest='postprocess', action='store_true', default=False,
-                    help='Postprocess the reasoning')
-# Subtask context
-parser.add_argument('--subtask-context', dest='subtaskContext', action='store_true', default=False,
-                    help='Include context in subtasks')
-
-# Search results number
-parser.add_argument('--search-results', dest='search_results', type=int, action='store', default=2,
-                    help='Number of search results to return')
-# Plan message
-parser.add_argument('--plan-message', dest='plan_message', action='store', 
-                    help="What message to use during planning",
-)                   
-
-DEFAULT_PROMPT="floating hair, portrait, ((loli)), ((one girl)), cute face, hidden hands, asymmetrical bangs, beautiful detailed eyes, eye shadow, hair ornament, ribbons, bowties, buttons, pleated skirt, (((masterpiece))), ((best quality)), colorful|((part of the head)), ((((mutated hands and fingers)))), deformed, blurry, bad anatomy, disfigured, poorly drawn face, mutation, mutated, extra limb, ugly, poorly drawn hands, missing limb, blurry, floating limbs, disconnected limbs, malformed hands, blur, out of focus, long neck, long body, Octane renderer, lowres, bad anatomy, bad hands, text"
-DEFAULT_API_BASE = os.environ.get("DEFAULT_API_BASE", "http://api:8080")
-# TTS api base
-parser.add_argument('--tts-api-base', dest='tts_api_base', action='store', default=DEFAULT_API_BASE,
-                    help='TTS api base')
-# LocalAI api base
-parser.add_argument('--localai-api-base', dest='localai_api_base', action='store', default=DEFAULT_API_BASE,
-                    help='LocalAI api base')
-# Images api base
-parser.add_argument('--images-api-base', dest='images_api_base', action='store', default=DEFAULT_API_BASE,
-                    help='Images api base')
-# Embeddings api base
-parser.add_argument('--embeddings-api-base', dest='embeddings_api_base', action='store', default=DEFAULT_API_BASE,
-                    help='Embeddings api base')
-# Functions model
-parser.add_argument('--functions-model', dest='functions_model', action='store', default="functions",
-                    help='Functions model')
-# Embeddings model
-parser.add_argument('--embeddings-model', dest='embeddings_model', action='store', default="all-MiniLM-L6-v2",
-                    help='Embeddings model')
-# LLM model
-parser.add_argument('--llm-model', dest='llm_model', action='store', default="gpt-4",
-                    help='LLM model')
-# Voice model
-parser.add_argument('--tts-model', dest='tts_model', action='store', default="en-us-kathleen-low.onnx",
-                    help='TTS model')
-# Stable diffusion model
-parser.add_argument('--stablediffusion-model', dest='stablediffusion_model', action='store', default="stablediffusion",
-                    help='Stable diffusion model')
-# Stable diffusion prompt
-parser.add_argument('--stablediffusion-prompt', dest='stablediffusion_prompt', action='store', default=DEFAULT_PROMPT,
-                    help='Stable diffusion prompt')
-# Force action
-parser.add_argument('--force-action', dest='force_action', action='store', default="",
-                    help='Force an action')
-# Debug mode
-parser.add_argument('--debug', dest='debug', action='store_true', default=False,
-                    help='Debug mode')
-# Critic mode
-parser.add_argument('--critic', dest='critic', action='store_true', default=False,
-                    help='Enable critic')
-# Parse arguments
-args = parser.parse_args()
-
-STABLEDIFFUSION_MODEL = os.environ.get("STABLEDIFFUSION_MODEL", args.stablediffusion_model)
-STABLEDIFFUSION_PROMPT = os.environ.get("STABLEDIFFUSION_PROMPT", args.stablediffusion_prompt)
-FUNCTIONS_MODEL = os.environ.get("FUNCTIONS_MODEL", args.functions_model)
-EMBEDDINGS_MODEL = os.environ.get("EMBEDDINGS_MODEL", args.embeddings_model)
-LLM_MODEL = os.environ.get("LLM_MODEL", args.llm_model)
-VOICE_MODEL= os.environ.get("TTS_MODEL",args.tts_model)
-STABLEDIFFUSION_MODEL = os.environ.get("STABLEDIFFUSION_MODEL",args.stablediffusion_model)
-STABLEDIFFUSION_PROMPT = os.environ.get("STABLEDIFFUSION_PROMPT", args.stablediffusion_prompt)
-PERSISTENT_DIR = os.environ.get("PERSISTENT_DIR", "/data")
-SYSTEM_PROMPT = ""
-if os.environ.get("SYSTEM_PROMPT") or args.system_prompt:
-    SYSTEM_PROMPT = os.environ.get("SYSTEM_PROMPT", args.system_prompt)
-
-LOCALAI_API_BASE = args.localai_api_base
-TTS_API_BASE = args.tts_api_base
-IMAGE_API_BASE = args.images_api_base
-EMBEDDINGS_API_BASE = args.embeddings_api_base
-
-# Set log level
-LOG_LEVEL = "INFO"
 
 def my_filter(record):
     return record["level"].no >= logger.level(LOG_LEVEL).no
-
-logger.remove()
-logger.add(sys.stderr, filter=my_filter)
-
-if args.debug:
-    LOG_LEVEL = "DEBUG"
-logger.debug("Debug mode on")
-
-FUNCTIONS_MODEL = os.environ.get("FUNCTIONS_MODEL", args.functions_model)
-EMBEDDINGS_MODEL = os.environ.get("EMBEDDINGS_MODEL", args.embeddings_model)
-LLM_MODEL = os.environ.get("LLM_MODEL", args.llm_model)
-VOICE_MODEL= os.environ.get("TTS_MODEL",args.tts_model)
-STABLEDIFFUSION_MODEL = os.environ.get("STABLEDIFFUSION_MODEL",args.stablediffusion_model)
-STABLEDIFFUSION_PROMPT = os.environ.get("STABLEDIFFUSION_PROMPT", args.stablediffusion_prompt)
-PERSISTENT_DIR = os.environ.get("PERSISTENT_DIR", "/data")
-SYSTEM_PROMPT = ""
-if os.environ.get("SYSTEM_PROMPT") or args.system_prompt:
-    SYSTEM_PROMPT = os.environ.get("SYSTEM_PROMPT", args.system_prompt)
-
-LOCALAI_API_BASE = args.localai_api_base
-TTS_API_BASE = args.tts_api_base
-IMAGE_API_BASE = args.images_api_base
-EMBEDDINGS_API_BASE = args.embeddings_api_base
 
 ## Constants
 REPLY_ACTION = "reply"
@@ -359,11 +258,162 @@ agent_actions = {
     },
 }
 
-if __name__ == "__main__":
+def set_globals(environ, args):
+    """populates some global settings from the runtime context
+    
+    (until we can replace these with locals)
+    """
+
+    global DEFAULT_API_BASE
+    global DEFAULT_PROMPT
+    global EMBEDDINGS_API_BASE
+    global EMBEDDINGS_MODEL
+    global FUNCTIONS_MODEL
+    global IMAGE_API_BASE
+    global LLM_MODEL
+    global LOCALAI_API_BASE
+    global PERSISTENT_DIR
+    global STABLEDIFFUSION_MODEL
+    global STABLEDIFFUSION_PROMPT
+    global SYSTEM_PROMPT
+    global TTS_API_BASE
+    global VOICE_MODEL
+
+    DEFAULT_API_BASE = environ.get("DEFAULT_API_BASE", DEFAULT_API_BASE)
+    DEFAULT_PROMPT="floating hair, portrait, ((loli)), ((one girl)), cute face, hidden hands, asymmetrical bangs, beautiful detailed eyes, eye shadow, hair ornament, ribbons, bowties, buttons, pleated skirt, (((masterpiece))), ((best quality)), colorful|((part of the head)), ((((mutated hands and fingers)))), deformed, blurry, bad anatomy, disfigured, poorly drawn face, mutation, mutated, extra limb, ugly, poorly drawn hands, missing limb, blurry, floating limbs, disconnected limbs, malformed hands, blur, out of focus, long neck, long body, Octane renderer, lowres, bad anatomy, bad hands, text"
+    EMBEDDINGS_API_BASE = args.embeddings_api_base
+    EMBEDDINGS_MODEL = environ.get("EMBEDDINGS_MODEL", args.embeddings_model)
+    FUNCTIONS_MODEL = environ.get("FUNCTIONS_MODEL", args.functions_model)
+    IMAGE_API_BASE = args.images_api_base
+    LLM_MODEL = environ.get("LLM_MODEL", args.llm_model)
+    LOCALAI_API_BASE = args.localai_api_base
+    PERSISTENT_DIR = environ.get("PERSISTENT_DIR", "/data")
+    STABLEDIFFUSION_MODEL = environ.get("STABLEDIFFUSION_MODEL", args.stablediffusion_model)
+    STABLEDIFFUSION_PROMPT = environ.get("STABLEDIFFUSION_PROMPT", args.stablediffusion_prompt)
+
+    if environ.get("SYSTEM_PROMPT") or args.system_prompt:
+        SYSTEM_PROMPT = environ.get("SYSTEM_PROMPT", args.system_prompt)
+    else:
+        SYSTEM_PROMPT = ""
+
+    TTS_API_BASE = args.tts_api_base
+    VOICE_MODEL= environ.get("TTS_MODEL",args.tts_model)
+
+    assert EMBEDDINGS_API_BASE is not None
+    assert EMBEDDINGS_MODEL is not None
+    assert FUNCTIONS_MODEL is not None
+    assert IMAGE_API_BASE is not None
+    assert LLM_MODEL is not None
+    assert LOCALAI_API_BASE is not None
+    assert PERSISTENT_DIR is not None
+    assert STABLEDIFFUSION_MODEL is not None
+    assert STABLEDIFFUSION_PROMPT is not None
+    assert TTS_API_BASE is not None
+    assert VOICE_MODEL is not None
+
+
+def parse_args(args):
+    parser = argparse.ArgumentParser(description='LocalAGI')
+
+    # System prompt
+    parser.add_argument('--system-prompt', dest='system_prompt', action='store',
+                        help='System prompt to use')
+    # Batch mode
+    parser.add_argument('--prompt', dest='prompt', action='store', default=False,
+                        help='Prompt mode')
+    # Interactive mode
+    parser.add_argument('--interactive', dest='interactive', action='store_true', default=False,
+                        help='Interactive mode. Can be used with --prompt to start an interactive session')
+    # skip avatar creation
+    parser.add_argument('--skip-avatar', dest='skip_avatar', action='store_true', default=False,
+                        help='Skip avatar creation') 
+    # Reevaluate
+    parser.add_argument('--re-evaluate', dest='re_evaluate', action='store_true', default=False,
+                        help='Reevaluate if another action is needed or we have completed the user request')
+    # Postprocess
+    parser.add_argument('--postprocess', dest='postprocess', action='store_true', default=False,
+                        help='Postprocess the reasoning')
+    # Subtask context
+    parser.add_argument('--subtask-context', dest='subtaskContext', action='store_true', default=False,
+                        help='Include context in subtasks')
+
+    # Search results number
+    parser.add_argument('--search-results', dest='search_results', type=int, action='store', default=2,
+                        help='Number of search results to return')
+    # Plan message
+    parser.add_argument('--plan-message', dest='plan_message', action='store', 
+                        help="What message to use during planning",
+    )                   
+
+    # TTS api base
+    parser.add_argument('--tts-api-base', dest='tts_api_base', action='store', default=DEFAULT_API_BASE,
+                        help='TTS api base')
+    # LocalAI api base
+    parser.add_argument('--localai-api-base', dest='localai_api_base', action='store', default=DEFAULT_API_BASE,
+                        help='LocalAI api base')
+    # Images api base
+    parser.add_argument('--images-api-base', dest='images_api_base', action='store', default=DEFAULT_API_BASE,
+                        help='Images api base')
+    # Embeddings api base
+    parser.add_argument('--embeddings-api-base', dest='embeddings_api_base', action='store', default=DEFAULT_API_BASE,
+                        help='Embeddings api base')
+    # Functions model
+    parser.add_argument('--functions-model', dest='functions_model', action='store', default="functions",
+                        help='Functions model')
+    # Embeddings model
+    parser.add_argument('--embeddings-model', dest='embeddings_model', action='store', default="all-MiniLM-L6-v2",
+                        help='Embeddings model')
+    # LLM model
+    parser.add_argument('--llm-model', dest='llm_model', action='store', default="gpt-4",
+                        help='LLM model')
+    # Voice model
+    parser.add_argument('--tts-model', dest='tts_model', action='store', default="en-us-kathleen-low.onnx",
+                        help='TTS model')
+    # Stable diffusion model
+    parser.add_argument('--stablediffusion-model', dest='stablediffusion_model', action='store', default="stablediffusion",
+                        help='Stable diffusion model')
+    # Stable diffusion prompt
+    parser.add_argument('--stablediffusion-prompt', dest='stablediffusion_prompt', action='store', default=DEFAULT_PROMPT,
+                        help='Stable diffusion prompt')
+    # Force action
+    parser.add_argument('--force-action', dest='force_action', action='store', default="",
+                        help='Force an action')
+    # Debug mode
+    parser.add_argument('--debug', dest='debug', action='store_true', default=False,
+                        help='Debug mode')
+    # Critic mode
+    parser.add_argument('--critic', dest='critic', action='store_true', default=False,
+                        help='Enable critic')
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    set_globals(os.environ, args)
+
+    return args
+
+
+def init_logging(args):
+    global LOG_LEVEL
+
+    # Set log level
+    LOG_LEVEL = "INFO"
+
+    logger.remove()
+    logger.add(sys.stderr, filter=my_filter)
+
+    if args.debug:
+        LOG_LEVEL = "DEBUG"
+
+    logger.debug("Debug mode on")
+
+
+def run_agent(args):
     conversation_history = []
 
     # Create a LocalAGI instance
     logger.info("Creating LocalAGI instance")
+
     localagi = LocalAGI(
         agent_actions=agent_actions,
         llm_model=LLM_MODEL,
@@ -432,3 +482,9 @@ if __name__ == "__main__":
                 subtaskContext=args.subtaskContext,
                 )
             localagi.tts_play(conversation_history[-1]["content"])
+
+
+def main():
+    args = parse_args(sys.argv)
+    init_logging(args)
+    run_agent(args)
