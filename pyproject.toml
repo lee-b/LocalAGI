@@ -17,6 +17,18 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+dependencies = [
+  "langchain",
+  "langchain-community",
+  "openai==0.28",
+  "chromadb",
+  "pysqlite3-binary",
+  "requests",
+  "ascii-magic",
+  "loguru",
+  "duckduckgo_search==4.1.1",
+]
+
 [project.scripts]
 localagi = "localagi.__main__:main"
 
