@@ -4,70 +4,66 @@ import requests
 from loguru import logger
 import json
 
-DEFAULT_API_BASE = "http://api:8080"
-VOICE_MODEL = "en-us-kathleen-low.onnx"
-STABLEDIFFUSION_MODEL = "stablediffusion"
-FUNCTIONS_MODEL = "functions"
-LLM_MODEL = "gpt-4"
+from .config import Config
+
 
 # LocalAGI class
 class LocalAGI:
     # Constructor
-    def __init__(self, 
-                 plan_action="plan", 
-                 reply_action="reply",
-                 force_action="",
-                 agent_actions={}, 
-                 plan_message="",
-                 api_base=DEFAULT_API_BASE, 
-                 tts_api_base="", 
-                 stablediffusion_api_base="",
-                 tts_model=VOICE_MODEL, 
-                 stablediffusion_model=STABLEDIFFUSION_MODEL, 
-                 functions_model=FUNCTIONS_MODEL, 
-                 llm_model=LLM_MODEL,
-                 tts_player="aplay",
-                 action_callback=None,
-                 reasoning_callback=None,
-                 ):
-        self.api_base = api_base
-        self.agent_actions = agent_actions
+    def __init__(
+        self,
+        cfg: Config,
+        plan_action="plan", 
+        reply_action="reply",
+        force_action="",
+        agent_actions=None,
+        plan_message="",
+        tts_player="aplay",
+        action_callback=None,
+        reasoning_callback=None,
+    ):
+        self.api_base = cfg.DEFAULT_API_BASE
+        self.agent_actions = agent_actions or {}
         self.plan_message = plan_message
         self.force_action = force_action
         self.tts_player = tts_player
         self.action_callback = action_callback
         self.reasoning_callback = reasoning_callback
+
         self.agent_actions[plan_action] = {
-                                            "function": self.generate_plan,
-                                            "plannable": False,
-                                            "description": 'The assistant for solving complex tasks that involves calling more functions in sequence, replies with the action "'+plan_action+'".',
-                                            "signature": {
-                                                "name": plan_action,
-                                                "description": """Plan complex tasks.""",
-                                                "parameters": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "description": {
-                                                            "type": "string",
-                                                            "description": "reasoning behind the planning"
-                                                        },
-                                                    },
-                                                    "required": ["description"]
-                                                }
-                                            },
-                                        }
+            "function": self.generate_plan,
+            "plannable": False,
+            "description": 'The assistant for solving complex tasks that involves calling more functions in sequence, replies with the action "'+plan_action+'".',
+            "signature": {
+                "name": plan_action,
+                "description": """Plan complex tasks.""",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "description": {
+                            "type": "string",
+                            "description": "reasoning behind the planning"
+                        },
+                    },
+                    "required": ["description"]
+                }
+            },
+        }
+
         self.agent_actions[reply_action] = {
-                                        "function": None,
-                                        "plannable": False,
-                                        "description": 'For replying to the user, the assistant replies with the action "'+reply_action+'" and the reply to the user directly when there is nothing to do.',
-                                    }
-        self.tts_api_base = tts_api_base if tts_api_base else self.api_base
-        self.stablediffusion_api_base = stablediffusion_api_base if stablediffusion_api_base else self.api_base
-        self.tts_model = tts_model
-        self.stablediffusion_model = stablediffusion_model
-        self.functions_model = functions_model
-        self.llm_model = llm_model
+            "function": None,
+            "plannable": False,
+            "description": 'For replying to the user, the assistant replies with the action "'+reply_action+'" and the reply to the user directly when there is nothing to do.',
+        }
+
+        self.tts_api_base = cfg.TTS_API_BASE or cfg.DEFAULT_API_BASE
+        self.stablediffusion_api_base = cfg.IMAGE_API_BASE or cfg.DEFAULT_API_BASE
+        self.tts_model = cfg.LLM_MODEL
+        self.stablediffusion_model = cfg.STABLEDIFFUSION_MODEL
+        self.functions_model = cfg.FUNCTIONS_MODEL
+        self.llm_model = cfg.LLM_MODEL
         self.reply_action = reply_action
+
     # Function to create images with LocalAI
     def get_avatar(self, input_text):
         response = openai.Image.create(
@@ -112,52 +108,59 @@ class LocalAGI:
             logger.info('Request failed with status code', response.status_code)
 
     # Function to analyze the user input and pick the next action to do
-    def needs_to_do_action(self, user_input, agent_actions={}):
+    def needs_to_do_action(self, user_input, agent_actions=None):
+        agent_actions = agent_actions or {}
+
         if len(agent_actions) == 0:
             agent_actions = self.agent_actions
+
         # Get the descriptions and the actions name (the keys)
         descriptions=self.action_description("", agent_actions)
 
         messages = [
-                {"role": "user",
+            {
+                "role": "user",
                 "content": f"""Transcript of AI assistant responding to user requests. Replies with the action to perform and the reasoning.
-    {descriptions}"""},
-                {"role": "user",
-    "content": f"""{user_input}
+    {descriptions}"""
+            },
+            {
+                "role": "user",
+                "content": f"""{user_input}
 Function call: """
-                }
-            ]
+            }
+        ]
+
         functions = [
             {
-            "name": "intent",
-            "description": """Decide to do an action.""",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                "confidence": {
-                    "type": "number",
-                    "description": "confidence of the action"
-                },
-                "detailed_reasoning": {
-                    "type": "string",
-                    "description": "reasoning behind the intent"
-                },
-                # "detailed_reasoning": {
-                #     "type": "string",
-                #     "description": "reasoning behind the intent"
-                # },
-                "action": {
-                    "type": "string",
-                    "enum": list(agent_actions.keys()),
-                    "description": "user intent"
-                },
-                },
-                "required": ["action"]
-            }
+                "name": "intent",
+                "description": """Decide to do an action.""",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                    "confidence": {
+                        "type": "number",
+                        "description": "confidence of the action"
+                    },
+                    "detailed_reasoning": {
+                        "type": "string",
+                        "description": "reasoning behind the intent"
+                    },
+                    # "detailed_reasoning": {
+                    #     "type": "string",
+                    #     "description": "reasoning behind the intent"
+                    # },
+                    "action": {
+                        "type": "string",
+                        "enum": list(agent_actions.keys()),
+                        "description": "user intent"
+                    },
+                    },
+                    "required": ["action"]
+                }
             },    
         ]
+
         response = openai.ChatCompletion.create(
-            #model="gpt-3.5-turbo",
             model=self.functions_model,
             messages=messages,
             request_timeout=1200,
@@ -168,7 +171,9 @@ Function call: """
             #function_call="auto"
             function_call={"name": "intent"},
         )
+
         response_message = response["choices"][0]["message"]
+
         if response_message.get("function_call"):
             function_name = response.choices[0].message["function_call"].name
             function_parameters = response.choices[0].message["function_call"].arguments
@@ -177,10 +182,11 @@ Function call: """
             logger.debug(">>> function name: "+function_name)
             logger.debug(">>> function parameters: "+function_parameters)
             return res
+
         return {"action": self.reply_action}
 
-    # This is used to collect the descriptions of the agent actions, used to populate the LLM prompt
     def action_description(self, action, agent_actions):
+        # This is used to collect the descriptions of the agent actions, used to populate the LLM prompt
         descriptions=""
         # generate descriptions of actions that the agent can pick
         for a in agent_actions:
@@ -189,9 +195,8 @@ Function call: """
         return descriptions
 
 
-    ### This function is used to process the functions given a user input.
-    ### It picks a function, executes it and returns the list of messages containing the result.
-    def process_functions(self, user_input, action="",):
+    def process_functions(self, user_input, action=""):
+        """Dispatches function calls, returns message results"""
 
         descriptions=self.action_description(action, self.agent_actions)
 
@@ -205,20 +210,27 @@ Function call: """
 Function call: """
                 }
             ]
+
         response = self.function_completion(messages, action=action)
         response_message = response["choices"][0]["message"]
-        response_result = ""
+
         function_result = {}
+
         if response_message.get("function_call"):
             function_name = response.choices[0].message["function_call"].name
             function_parameters = response.choices[0].message["function_call"].arguments
+
             logger.info("==> function parameters: {function_parameters}",function_parameters=function_parameters)
+
             function_to_call = self.agent_actions[function_name]["function"]
+
             if self.action_callback:
                 self.action_callback(function_name, function_parameters)
 
             function_result = function_to_call(function_parameters, agent_actions=self.agent_actions, localagi=self)
+
             logger.info("==> function result: {function_result}", function_result=function_result)
+
             messages.append(
                 {
                     "role": "assistant",
@@ -226,6 +238,7 @@ Function call: """
                     "function_call": {"name": function_name, "arguments": function_parameters,},
                 }
             )
+
             messages.append(
                 {
                     "role": "function",
@@ -233,21 +246,25 @@ Function call: """
                     "content": str(function_result)
                 }
             )
+
         return messages, function_result
 
-    ### function_completion is used to autocomplete functions given a list of messages
     def function_completion(self, messages, action=""):
+        """function_completion is used to autocomplete functions given a list of messages"""
         function_call = "auto"
+
         if action != "":
             function_call={"name": action}
+
         logger.debug("==> function name: {function_call}", function_call=function_call)
+
         # get the functions from the signatures of the agent actions, if exists
         functions = []
         for action in self.agent_actions:
             if self.agent_actions[action].get("signature"):
                 functions.append(self.agent_actions[action]["signature"])
+
         response = openai.ChatCompletion.create(
-            #model="gpt-3.5-turbo",
             model=self.functions_model,
             messages=messages,
             functions=functions,
@@ -260,29 +277,37 @@ Function call: """
 
         return response
 
-    # Rework the content of each message in the history in a way that is understandable by the LLM
-    # TODO: switch to templates (?)
     def process_history(self, conversation_history):
+        """Rework the content of each message in the history in a way that is understandable by the LLM"""
+
+        # TODO: switch to templates (?)
+
         messages = ""
         for message in conversation_history:
-            # if there is content append it
+            # If there is content, append it.
             if message.get("content") and message["role"] == "function":
                 messages+="Function result: \n" + message["content"]+"\n"
+
             elif message.get("function_call"):
                 # encode message["function_call" to json and appends it
                 fcall = json.dumps(message["function_call"])
                 parameters = "calling " + message["function_call"]["name"]+" with arguments:"
+
                 args=json.loads(message["function_call"]["arguments"])
                 for arg in args:
                     logger.debug(arg)
                     logger.debug(args)
                     v=args[arg]
                     parameters+=f""" {arg}=\"{v}\""""
+
                 messages+= parameters+"\n"
+
             elif message.get("content") and message["role"] == "user":
                 messages+=message["content"]+"\n"
+
             elif message.get("content") and message["role"] == "assistant":
                 messages+="Assistant message: "+message["content"]+"\n"
+
         return messages
 
     def converse(self, responses):
@@ -294,12 +319,14 @@ Function call: """
             request_timeout=1200,
             temperature=0.1,
         )
+
         responses.append(
             {
                 "role": "assistant",
                 "content": response.choices[0].message["content"],
             }
         )
+
         return responses
 
     ### Fine tune a string before feeding into the LLM
@@ -378,15 +405,17 @@ Function call: """
             # plan_message = "The assistant replies with a plan of 3 steps to answer the request with a list of subtasks with logical steps. The reasoning includes a self-contained, detailed and descriptive instruction to fullfill the task."
 
         messages = [
-                {"role": "user",
+            {
+                "role": "user",
                 "content": f"""Transcript of AI assistant responding to user requests. 
     {descriptions}
 
     Request: {plan_message}
     Thought: {res["description"]}
     Function call: """
-                }
-            ]
+            }
+        ]
+
         # get list of plannable actions
         plannable_actions = []
         for action in agent_actions:
@@ -396,32 +425,33 @@ Function call: """
 
         functions = [
             {
-            "name": "plan",
-            "description": """Decide to do an action.""",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "subtasks": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "detailed_reasoning": {
-                                    "type": "string",
-                                    "description": "subtask list",
+                "name": "plan",
+                "description": """Decide to do an action.""",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "subtasks": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "detailed_reasoning": {
+                                        "type": "string",
+                                        "description": "subtask list",
+                                    },
+                                    "function": {
+                                        "type": "string",
+                                        "enum": plannable_actions,
+                                    },               
                                 },
-                                "function": {
-                                    "type": "string",
-                                    "enum": plannable_actions,
-                                },               
                             },
                         },
                     },
-                },
-                "required": ["subtasks"]
-            }
+                    "required": ["subtasks"]
+                }
             },    
         ]
+
         response = openai.ChatCompletion.create(
             #model="gpt-3.5-turbo",
             model=self.functions_model,
@@ -433,6 +463,7 @@ Function call: """
             #function_call="auto"
             function_call={"name": "plan"},
         )
+
         response_message = response["choices"][0]["message"]
         if response_message.get("function_call"):
             function_name = response.choices[0].message["function_call"].name
@@ -441,6 +472,7 @@ Function call: """
             res = json.loads(function_parameters)
             logger.debug("<<< function name: {function_name} >>>> parameters: {parameters}", function_name=function_name,parameters=function_parameters)
             return res
+
         return {"action": self.reply_action}
     
     def evaluate(self,user_input, conversation_history = [], critic=True, re_evaluate=False,re_evaluation_in_progress=False, postprocess=False, subtaskContext=False):
@@ -477,6 +509,7 @@ Function call: """
             action_picker_message+="```\n"+user_input+"\n```"
             action_picker_message+="\n\nObservation: "+observation
             # if there is no action to do, we can just reply to the user with REPLY_ACTION
+    
         try:
               critic_msg=""
               if critic:
@@ -572,6 +605,7 @@ Function call: """
                     # if postprocess:
                     #    subtask_result=post_process(subtask_result)
                     responses.append(subtask_response[-1])
+    
             if re_evaluate:
                 ## Better output or this infinite loops..
                 logger.info("-> Re-evaluate if another action is needed")
@@ -630,4 +664,6 @@ Function call: """
             # logger.info the latest response from the conversation history
             logger.info(conversation_history[-1]["content"])
             #self.tts(conversation_history[-1]["content"])
+    
         return conversation_history
+    
