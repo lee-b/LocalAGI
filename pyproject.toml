@@ -17,6 +17,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.scripts]
+localagi = "localagi.__main__:main"
+
 [project.urls]
 "Homepage" = "https://github.com/mudler/LocalAGI"
 "Bug Tracker" = "https://github.com/mudler/LocalAGI/issues"
