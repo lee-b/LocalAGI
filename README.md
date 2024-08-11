@@ -55,9 +55,9 @@ No frills, just run docker-compose and start chatting with your virtual assistan
 # Modify the configuration
 # vim .env
 # first run (and pulling the container)
-docker-compose up
+sh ./run-full-stack.sh
 # next runs 
-docker-compose run -i --rm localagi
+sh ./run-full-stack.sh -i --rm localagi
 ```
 
 ## How to use it
@@ -69,7 +69,7 @@ By default localagi starts in interactive mode
 Road trip planner by limiting searching to internet to 3 results only:
 
 ```bash
-docker-compose run -i --rm localagi \
+./run-full-stack.sh -i --rm localagi \
   --skip-avatar \
   --subtask-context \
   --postprocess \
@@ -80,7 +80,7 @@ docker-compose run -i --rm localagi \
 Limit results of planning to 3 steps:
 
 ```bash
-docker-compose run -i --rm localagi \
+./run-full-stack.sh -i --rm localagi \
   --skip-avatar \
   --subtask-context \
   --postprocess \
@@ -168,10 +168,10 @@ The intention of this project is to keep the agent minimal, so can be built on t
 
 ## Development
 
-Run docker-compose with main.py checked-out:
+Run docker-compose with source checked-out:
 
 ```bash
-docker-compose run -v main.py:/app/main.py -i --rm localagi
+docker-compose run -v ./src:/app/src -i --rm localagi
 ```
 
 ## Notes

@@ -1,0 +1,4 @@
+services:
+  localagi:
+    devices:
+    - /dev/snd
